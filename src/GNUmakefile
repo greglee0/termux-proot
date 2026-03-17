@@ -1,6 +1,10 @@
 # If you want to build outside of the source tree, use the -f option:
 #     make -f ${SOMEWHERE}/proot/src/GNUmakefile
 
+# 不内嵌LOADER 由 PROOT_LOADER 运行时环境变量指定
+# 在 PROOT_LOADER环境变量 中安装 loader，而不是每次都解压
+# PROOT_UNBUNDLE_LOADER # 值表示 loader的绝对路径
+
 # the VPATH variable must point to the actual makefile directory
 VPATH := $(dir $(lastword $(MAKEFILE_LIST)))
 SRC    = $(dir $(firstword $(MAKEFILE_LIST)))
@@ -10,13 +14,25 @@ RM       = rm
 INSTALL  = install
 CC       ?= $(CROSS_COMPILE)gcc
 LD       = $(CC)
-STRIP    ?= $(CROSS_COMPILE)strip
-OBJCOPY  ?= $(CROSS_COMPILE)objcopy
-OBJDUMP  ?= $(CROSS_COMPILE)objdump
+
+#Termux 安装Clang没有 strip 只有 llvm-strip
+# STRIP    ?= $(CROSS_COMPILE)strip
+# OBJCOPY  ?= $(CROSS_COMPILE)objcopy
+# OBJDUMP  ?= $(CROSS_COMPILE)objdump
+# 通用工具查找函数
+find_tool = $(shell command -v $(CROSS_COMPILE)llvm-$(1) 2>/dev/null || command -v $(CROSS_COMPILE)$(1) 2>/dev/null)
+
+STRIP    ?= $(call find_tool,strip)
+OBJCOPY  ?= $(call find_tool,objcopy)
+OBJDUMP  ?= $(call find_tool,objdump)
+READELF  ?= $(call find_tool,readelf)
 
 CPPFLAGS += -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -I. -I$(VPATH)
 CFLAGS   += -Wall -Wextra -O2
-LDFLAGS  += -ltalloc -Wl,-z,noexecstack
+
+# LDFLAGS  += -ltalloc -Wl,-z,noexecstack
+# 核心修改：-Bstatic指定后续库静态链接，-Bdynamic恢复动态链接
+LDFLAGS  += -Wl,-Bstatic -ltalloc -Wl,-Bdynamic,-z,noexecstack
 
 OBJECTS += \
 	cli/cli.o		\
@@ -126,9 +142,9 @@ ifeq ($(V), 0)
     Q     = @
     silently = >/dev/null 2>&1
 else
-    quiet = 
-    Q     = 
-    silently = 
+    quiet =
+    Q     =
+    silently =
 endif
 
 ######################################################################
@@ -235,7 +251,7 @@ $(eval $(call build_loader,-m32))
 endif
 
 loader/loader-info.c: loader/loader
-	readelf -s $< | awk -f loader/loader-info.awk > $@
+	$(READELF) -s $< | awk -f loader/loader-info.awk > $@
 
 ######################################################################
 # Dependencies
